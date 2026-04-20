@@ -6,7 +6,7 @@ inputs:
     required: false
     default: 'high'
   annotate-prs:
-    description: 'Annotate PR diffs with inline comments'
+    description: 'Upload SARIF to GitHub code scanning to annotate PR diffs with inline comments'
     required: false
     default: 'true'
   path:
@@ -16,12 +16,14 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - run: npm install -g drift-sentinel
+    - name: Install drift sentinel
+      run: npm install -g drift-sentinel
       shell: bash
-    - run: drift audit ${{ inputs.path }} --max-severity=${{ inputs.max-severity }} --sarif
+    - name: Run drift audit
+      run: drift audit ${{ inputs.path }} --max-severity=${{ inputs.max-severity }} --sarif
       shell: bash
     - name: Upload SARIF
-      if: always()
+      if: always() && inputs.annotate-prs == 'true'
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: drift-report.sarif

@@ -1,8 +1,8 @@
-# drift-sentinel
+# Drift Sentinel
 
 > Detect semantic drift between your documentation and code.
 
-drift-sentinel scans your project's documentation (Markdown, MDX) and checks every reference—links, code examples, CLI commands, symbol references, version numbers—against the actual state of your codebase. When docs fall out of sync with code, drift-sentinel tells you exactly what's wrong and can auto-fix many issues.
+Drift Sentinel scans your project's documentation (Markdown, MDX) and checks every reference—links, code examples, CLI commands, symbol references, version numbers—against the actual state of your codebase. When docs fall out of sync with code, drift sentinel tells you exactly what's wrong and can auto-fix many issues.
 
 ## Drift Kinds
 
@@ -121,7 +121,7 @@ The comment must appear within 3 lines above the reference and include the drift
 ## GitHub Action
 
 ```yaml
-- uses: your-org/drift-sentinel/actions@v1
+- uses: bsurprised/drift-sentinel/actions@v1
   with:
     max-severity: high
     path: '.'
