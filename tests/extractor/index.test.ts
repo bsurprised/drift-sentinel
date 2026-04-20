@@ -145,6 +145,24 @@ describe('extractReferences', () => {
   });
 
   // ---- no false positives ----
+  it('classifies file-like inline code as link-file, not symbol', async () => {
+    const refs = await extract('See `DRIFT_REPORT.md` for details.');
+    const syms = byKind(refs, 'symbol');
+    const files = byKind(refs, 'link-file');
+    expect(syms).toHaveLength(0);
+    expect(files).toHaveLength(1);
+    expect(files[0].target).toBe('DRIFT_REPORT.md');
+  });
+
+  it('classifies path-like inline code as link-file', async () => {
+    const refs = await extract('Edit `./src/index.ts` to start.');
+    const syms = byKind(refs, 'symbol');
+    const files = byKind(refs, 'link-file');
+    expect(syms).toHaveLength(0);
+    expect(files).toHaveLength(1);
+    expect(files[0].target).toBe('./src/index.ts');
+  });
+
   it('does not extract regular inline code as symbol', async () => {
     const refs = await extract('Use `const x = 1` in your code.');
     const syms = byKind(refs, 'symbol');

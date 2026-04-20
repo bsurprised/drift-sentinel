@@ -9,6 +9,7 @@ import {
   CLI_PREFIXES,
   CLI_LANGS,
   BADGE_PATTERN,
+  FILE_REF_PATTERN,
 } from './patterns.js';
 
 /* ------------------------------------------------------------------ */
@@ -182,6 +183,19 @@ function extractMarkdownReferences(doc: ParsedDoc): DocReference[] {
         kind: 'cli-command',
         target,
         context: heading ?? '',
+      });
+      return;
+    }
+
+    // file-ref check (before symbol to avoid e.g. DRIFT_REPORT.md → symbol)
+    if (FILE_REF_PATTERN.test(value)) {
+      const ctx = parentContext(ic, tree);
+      refs.push({
+        id: makeId(path, line, 'link-file', value),
+        source: { path, line, column },
+        kind: 'link-file',
+        target: value,
+        context: ctx,
       });
       return;
     }

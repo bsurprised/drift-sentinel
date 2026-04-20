@@ -23,5 +23,9 @@ export const CLI_PREFIXES = [
 /** Fenced-code-block languages treated as CLI/shell */
 export const CLI_LANGS = ['bash', 'sh', 'shell', 'console'];
 
+/** Matches inline code that looks like a file reference (path or known extension) */
+export const FILE_REF_PATTERN =
+  /(?:^\.{0,2}[/\\])|\.(?:md|ts|tsx|js|jsx|mjs|cjs|json|yaml|yml|toml|xml|html|css|scss|less|txt|sh|bash|py|pyi|rs|go|java|cs|csproj|rb|php|c|cpp|h|hpp|cfg|ini|env|lock|svg|png|jpg|jpeg|gif|wasm|sql|graphql|proto|log|csv|dockerfile)$/i;
+
 /** Detects version numbers inside badge / shield URLs */
 export const BADGE_PATTERN = /(?:badge|shield).*?v?(\d+\.\d+(?:\.\d+)?)/i;

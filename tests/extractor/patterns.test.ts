@@ -6,6 +6,7 @@ import {
   CLI_PREFIXES,
   CLI_LANGS,
   BADGE_PATTERN,
+  FILE_REF_PATTERN,
 } from '../../src/extractor/patterns.js';
 
 describe('SYMBOL_PATTERN', () => {
@@ -86,6 +87,38 @@ describe('CLI_LANGS', () => {
     expect(CLI_LANGS).toContain('sh');
     expect(CLI_LANGS).toContain('shell');
     expect(CLI_LANGS).toContain('console');
+  });
+});
+
+describe('FILE_REF_PATTERN', () => {
+  it.each([
+    'DRIFT_REPORT.md',
+    'README.md',
+    'tsconfig.json',
+    'package.json',
+    'index.ts',
+    'App.tsx',
+    'main.py',
+    'Cargo.toml',
+    'style.css',
+    'schema.sql',
+    'data.csv',
+    './docs/guide.md',
+    '../README.md',
+    'src/index.ts',
+    '.env',
+  ])('matches file-like %s', (input) => {
+    expect(FILE_REF_PATTERN.test(input)).toBe(true);
+  });
+
+  it.each([
+    'UserService.create',
+    'Config.database.host',
+    'createUser()',
+    'hello',
+    'const x = 1',
+  ])('does not match non-file %s', (input) => {
+    expect(FILE_REF_PATTERN.test(input)).toBe(false);
   });
 });
 
