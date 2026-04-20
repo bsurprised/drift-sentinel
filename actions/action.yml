@@ -1,0 +1,27 @@
+name: 'Drift Sentinel'
+description: 'Detect semantic drift between documentation and code'
+inputs:
+  max-severity:
+    description: 'Fail if drift at or above this severity (high, medium, low)'
+    required: false
+    default: 'high'
+  annotate-prs:
+    description: 'Annotate PR diffs with inline comments'
+    required: false
+    default: 'true'
+  path:
+    description: 'Path to audit'
+    required: false
+    default: '.'
+runs:
+  using: 'composite'
+  steps:
+    - run: npm install -g drift-sentinel
+      shell: bash
+    - run: drift audit ${{ inputs.path }} --max-severity=${{ inputs.max-severity }} --sarif
+      shell: bash
+    - name: Upload SARIF
+      if: always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: drift-report.sarif

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Coverage
+coverage/
+
+# Generated reports
+DRIFT_REPORT.md
+drift-report.sarif
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# npm
+*.tgz
+.npm
+
+# Environment
+.env
+.env.*
+
+# Docs (LLD and generated docs)
+docs/
+
+# Logs
+*.log
