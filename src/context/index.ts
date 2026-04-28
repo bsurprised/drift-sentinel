@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import type { ProjectContext, PackageJson, TsConfig, CargoToml, Pyproject } from '../types.js';
 import { extractMakefileTargets } from './makefile.js';

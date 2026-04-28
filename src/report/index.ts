@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DriftReport, DriftConfig } from '../types.js';
-import { generateMarkdownReport, writeMarkdownReport } from './markdown.js';
+import { writeMarkdownReport } from './markdown.js';
 import { generateJsonReport } from './json.js';
 import { generateSarifReport } from './sarif.js';
 import { generateTerminalReport } from './terminal.js';

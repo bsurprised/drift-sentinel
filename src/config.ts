@@ -36,10 +36,8 @@ function deepMerge(base: DriftConfig, override: Partial<DriftConfig>): DriftConf
       existing !== null &&
       !Array.isArray(existing)
     ) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (result as any)[k] = { ...existing, ...val };
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (result as any)[k] = val;
     }
   }

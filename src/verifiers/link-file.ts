@@ -4,7 +4,6 @@ import type {
   Verifier,
   DriftIssue,
   DriftKind,
-  Severity,
   DocReference,
   ProjectContext,
   SymbolResolver,

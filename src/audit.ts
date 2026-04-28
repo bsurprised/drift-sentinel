@@ -130,7 +130,7 @@ function severityOrder(s: Severity): number {
 
 async function filterChangedDocs(docs: DocSource[], since: string, root: string): Promise<DocSource[]> {
   // Validate git ref to prevent injection
-  if (since.startsWith('-') || !/^[a-zA-Z0-9_.\/\-~^@{}]+$/.test(since)) {
+  if (since.startsWith('-') || !/^[a-zA-Z0-9_./\-~^@{}]+$/.test(since)) {
     throw new Error(`Invalid git ref: ${since}`);
   }
   const git = simpleGit({ baseDir: root, timeout: { block: 30000 } });

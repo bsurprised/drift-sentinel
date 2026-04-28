@@ -38,7 +38,7 @@ export async function discoverDocs(options: DiscoverOptions): Promise<DocSource[
     }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`Root path does not exist: ${root}`);
+      throw new Error(`Root path does not exist: ${root}`, { cause: err });
     }
     throw err;
   }

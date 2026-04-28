@@ -4,9 +4,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { execSync } from 'node:child_process';
 import { runAudit } from '../../src/audit.js';
-import { loadConfig, DEFAULT_CONFIG } from '../../src/config.js';
+import { DEFAULT_CONFIG } from '../../src/config.js';
 import { createLogger } from '../../src/util/logger.js';
-import type { DriftConfig, DriftKind } from '../../src/types.js';
+import type { DriftConfig } from '../../src/types.js';
 
 let fixtureDir: string;
 
