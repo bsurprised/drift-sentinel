@@ -1,7 +1,10 @@
 import { DriftReport, DriftIssue, Severity } from '../types.js';
+import type { DriftKind } from '../types.js';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { toRelativeUri } from './paths.js';
+import { VERIFIER_DESCRIPTIONS } from '../verifiers/catalog.js';
 
 let _version: string | undefined;
 function getVersion(): string {
@@ -40,7 +43,7 @@ function buildRules(issues: DriftIssue[]): Array<{
 
   return Array.from(seen.entries()).map(([kind, severity]) => ({
     id: kind,
-    shortDescription: { text: humanize(kind) },
+    shortDescription: { text: VERIFIER_DESCRIPTIONS[kind as DriftKind]?.description ?? humanize(kind) },
     defaultConfiguration: { level: SEVERITY_TO_LEVEL[severity] },
   }));
 }
@@ -52,7 +55,7 @@ function humanize(kind: string): string {
     .join(' ');
 }
 
-function buildResult(issue: DriftIssue) {
+function buildResult(issue: DriftIssue, root: string) {
   return {
     ruleId: issue.kind,
     level: SEVERITY_TO_LEVEL[issue.severity],
@@ -60,7 +63,10 @@ function buildResult(issue: DriftIssue) {
     locations: [
       {
         physicalLocation: {
-          artifactLocation: { uri: issue.reference.source.path },
+          artifactLocation: {
+            uri: toRelativeUri(issue.reference.source.path, root),
+            uriBaseId: 'PROJECTROOT',
+          },
           region: {
             startLine: issue.reference.source.line,
             startColumn: issue.reference.source.column,
@@ -73,6 +79,7 @@ function buildResult(issue: DriftIssue) {
 }
 
 export function generateSarifReport(report: DriftReport): string {
+  const rootUri = pathToFileURL(report.root).href;
   const sarif = {
     $schema: SARIF_SCHEMA,
     version: '2.1.0' as const,
@@ -86,7 +93,10 @@ export function generateSarifReport(report: DriftReport): string {
             rules: buildRules(report.issues),
           },
         },
-        results: report.issues.map(buildResult),
+        originalUriBaseIds: {
+          PROJECTROOT: { uri: rootUri.endsWith('/') ? rootUri : rootUri + '/' },
+        },
+        results: report.issues.map(issue => buildResult(issue, report.root)),
       },
     ],
   };

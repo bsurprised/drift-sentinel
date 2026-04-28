@@ -1,12 +1,13 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, mkdir, writeFile, rm, access } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execSync } from 'node:child_process';
 import { runAudit } from '../../src/audit.js';
-import { loadConfig, DEFAULT_CONFIG } from '../../src/config.js';
+import { DEFAULT_CONFIG, loadConfig } from '../../src/config.js';
 import { createLogger } from '../../src/util/logger.js';
-import type { DriftConfig, DriftKind } from '../../src/types.js';
+import { emitReport } from '../../src/report/index.js';
+import type { DriftConfig, DriftReport } from '../../src/types.js';
 
 let fixtureDir: string;
 
@@ -213,5 +214,289 @@ describe('runAudit integration', () => {
 
     expect(kinds.has('dead-file-ref')).toBe(false);
     expect(kinds.has('unknown-cli-command')).toBe(false);
+  });
+});
+
+describe('emitReport — output routing and writeReport gating (LLD-E)', () => {  let testDir: string;
+  let baseReport: DriftReport;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(path.join(os.tmpdir(), 'emit-test-'));
+    baseReport = {
+      root: testDir,
+      scannedDocs: 1,
+      scannedReferences: 1,
+      issues: [],
+      durationMs: 10,
+      generatedAt: new Date().toISOString(),
+    };
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it('writes DRIFT_REPORT.md by default (terminal mode)', async () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    try {
+      await emitReport(baseReport, { format: 'terminal', config: DEFAULT_CONFIG });
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).resolves.not.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('--no-report (writeReport: false) does not create DRIFT_REPORT.md', async () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    try {
+      const config: DriftConfig = { ...DEFAULT_CONFIG, writeReport: false };
+      await emitReport(baseReport, { format: 'terminal', config });
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).rejects.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('--report-path writes markdown to the specified custom path', async () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const customPath = path.join(testDir, 'custom-report.md');
+    try {
+      const config: DriftConfig = { ...DEFAULT_CONFIG, reportPath: customPath };
+      await emitReport(baseReport, { format: 'terminal', config });
+      await expect(access(customPath)).resolves.not.toThrow();
+      // Default path should NOT be created when reportPath is set
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).rejects.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('--json: stdout is pure JSON (starts with {), stderr contains summary', async () => {
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      stdoutChunks.push(String(chunk));
+      return true;
+    });
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      stderrChunks.push(String(chunk));
+      return true;
+    });
+    try {
+      const config: DriftConfig = { ...DEFAULT_CONFIG, writeReport: false };
+      await emitReport(baseReport, { format: 'json', config });
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+    const out = stdoutChunks.join('');
+    expect(out.trimStart()).toMatch(/^\{/);
+    expect(() => JSON.parse(out)).not.toThrow();
+    expect(stderrChunks.join('')).toContain('drift-sentinel:');
+  });
+
+  it('--json default: does NOT write DRIFT_REPORT.md without explicit writeReport', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      // No writeReport / reportPath set — machine-output mode must stay clean
+      await emitReport(baseReport, { format: 'json', config: { ...DEFAULT_CONFIG } });
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).rejects.toThrow();
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('--sarif default: does NOT write DRIFT_REPORT.md without explicit writeReport', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      await emitReport(baseReport, { format: 'sarif', config: { ...DEFAULT_CONFIG } });
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).rejects.toThrow();
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('--json with writeReport=true: DOES write DRIFT_REPORT.md', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      await emitReport(baseReport, {
+        format: 'json',
+        config: { ...DEFAULT_CONFIG, writeReport: true },
+      });
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).resolves.not.toThrow();
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('legacy 3-arg signature: emitReport(report, config, outputDir) still works', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    try {
+      // v1.0 call shape: positional config + outputDir
+      await emitReport(baseReport, DEFAULT_CONFIG, testDir);
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).resolves.not.toThrow();
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
+  it('--json: JSON output has both path (relative) and absPath fields on issue sources', async () => {
+    const issueReport: DriftReport = {
+      ...baseReport,
+      issues: [
+        {
+          reference: {
+            id: 'ref-1',
+            source: { path: path.join(testDir, 'README.md'), line: 1, column: 1 },
+            kind: 'link-file',
+            target: 'nonexistent.md',
+            context: 'ctx',
+          },
+          kind: 'dead-file-ref',
+          severity: 'high',
+          message: 'File not found',
+          autoFixable: false,
+        },
+      ],
+    };
+    const stdoutChunks: string[] = [];
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      stdoutChunks.push(String(chunk));
+      return true;
+    });
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      const config: DriftConfig = { ...DEFAULT_CONFIG, writeReport: false };
+      await emitReport(issueReport, { format: 'json', config });
+    } finally {
+      stdoutSpy.mockRestore();
+      vi.restoreAllMocks();
+    }
+    const parsed = JSON.parse(stdoutChunks.join(''));
+    expect(parsed.issues[0].reference.source.path).toBe('README.md');
+    expect(parsed.issues[0].reference.source.absPath).toBe(path.join(testDir, 'README.md'));
+  });
+
+  it('--sarif: stdout is valid SARIF JSON (version 2.1.0), stderr contains summary', async () => {
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      stdoutChunks.push(String(chunk));
+      return true;
+    });
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      stderrChunks.push(String(chunk));
+      return true;
+    });
+    try {
+      const config: DriftConfig = { ...DEFAULT_CONFIG, writeReport: false };
+      await emitReport(baseReport, { format: 'sarif', config });
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+    const out = stdoutChunks.join('');
+    const parsed = JSON.parse(out);
+    expect(parsed.version).toBe('2.1.0');
+    expect(parsed.runs[0].originalUriBaseIds.PROJECTROOT.uri).toMatch(/^file:\/\//);
+    expect(stderrChunks.join('')).toContain('drift-sentinel:');
+  });
+});
+
+describe('runAudit — pipeline split regression (LLD-G)', () => {
+  it('returns same issue kinds after pipeline refactor', async () => {
+    const config: DriftConfig = {
+      ...DEFAULT_CONFIG,
+      offline: true,
+      rules: { 'dead-external-link': 'off' },
+    };
+    const report = await runAudit(fixtureDir, config);
+
+    // Verify structural correctness — same kinds must still surface
+    const sortedKinds = [...report.issues.map(i => i.kind)].sort();
+    expect(sortedKinds.length).toBeGreaterThan(0);
+    expect(sortedKinds).toContain('unknown-cli-command');
+    expect(sortedKinds).toContain('dead-file-ref');
+
+    // Report envelope is intact
+    expect(report.root).toBe(fixtureDir);
+    expect(report.scannedDocs).toBeGreaterThanOrEqual(3);
+    expect(report.scannedReferences).toBeGreaterThan(0);
+    expect(report.generatedAt).toBeTruthy();
+    expect(report.durationMs).toBeGreaterThan(0);
+  });
+});
+
+describe('runAudit — kinds filter (LLD-B / B-02)', () => {
+  it('with kinds: [dead-file-ref] only reports dead-file-ref issues', async () => {
+    const config: DriftConfig = {
+      ...DEFAULT_CONFIG,
+      offline: true,
+      kinds: ['dead-file-ref'],
+    };
+    const report = await runAudit(fixtureDir, config);
+    // Must find the known dead-file-ref in fixture README
+    const kinds = new Set(report.issues.map(i => i.kind));
+    expect(kinds.has('dead-file-ref')).toBe(true);
+    // Other verifiers must NOT have run
+    expect(kinds.has('missing-symbol')).toBe(false);
+    expect(kinds.has('unknown-cli-command')).toBe(false);
+    expect(kinds.has('version-mismatch')).toBe(false);
+  });
+
+  it('with kinds: [] (empty) reports no issues from any verifier', async () => {
+    const config: DriftConfig = {
+      ...DEFAULT_CONFIG,
+      offline: true,
+      kinds: [],
+    };
+    const report = await runAudit(fixtureDir, config);
+    expect(report.issues).toHaveLength(0);
+  });
+});
+
+describe('loadConfig — ignorePaths CLI override (LLD-B / B-17)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(path.join(os.tmpdir(), 'cfg-b17-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('ignorePaths from config file is preserved when CLI omits --ignore', async () => {
+    await writeFile(
+      path.join(tmpDir, 'drift.config.mjs'),
+      'export default { ignorePaths: ["keep-me"] };\n',
+    );
+    const config = await loadConfig({}, tmpDir);
+    expect(config.ignorePaths).toEqual(['keep-me']);
+  });
+
+  it('CLI ignorePaths override replaces config file ignorePaths', async () => {
+    await writeFile(
+      path.join(tmpDir, 'drift.config.mjs'),
+      'export default { ignorePaths: ["old-path"] };\n',
+    );
+    const config = await loadConfig({ ignorePaths: ['new-path'] }, tmpDir);
+    expect(config.ignorePaths).toEqual(['new-path']);
+  });
+
+  it('passing ignorePaths: undefined does NOT erase config file value (B-17 root cause)', async () => {
+    await writeFile(
+      path.join(tmpDir, 'drift.config.mjs'),
+      'export default { ignorePaths: ["preserved"] };\n',
+    );
+    // Simulate what the FIXED CLI does: only adds ignorePaths when flag is present
+    const config = await loadConfig({ ignorePaths: undefined }, tmpDir);
+    expect(config.ignorePaths).toEqual(['preserved']);
   });
 });

@@ -163,6 +163,7 @@ function extractMarkdownReferences(doc: ParsedDoc): DocReference[] {
         kind: 'link-file',
         target: url,
         context: text,
+        origin: 'markdown-link',
       });
     }
   });
@@ -196,6 +197,7 @@ function extractMarkdownReferences(doc: ParsedDoc): DocReference[] {
         kind: 'link-file',
         target: value,
         context: ctx,
+        origin: 'inline-code',
       });
       return;
     }

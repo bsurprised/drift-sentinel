@@ -8,6 +8,10 @@ export type DriftKind =
   | 'deprecated-api-mention'
   | 'orphan-doc';
 
+/** All valid DriftKind values as a runtime constant (for CLI validation).
+ *  Re-exported from src/verifiers/catalog.ts for backward compatibility. */
+export { VALID_DRIFT_KINDS } from './verifiers/catalog.js';
+
 export type Severity = 'high' | 'medium' | 'low';
 
 export interface DocSource {
@@ -28,6 +32,8 @@ export interface DocReference {
   target: string;
   context: string;
   language?: string;
+  /** How this reference was expressed in source. Missing means treat as 'markdown-link'. */
+  origin?: 'inline-code' | 'markdown-link';
 }
 
 export interface DriftIssue {
@@ -49,6 +55,8 @@ export interface ProjectContext {
   csprojs?: Array<{ path: string; version?: string }>;
   makefileTargets: string[];
   detectedLanguages: Array<'typescript' | 'javascript' | 'rust' | 'dotnet' | 'python' | 'go'>;
+  /** Lazily returns all git-tracked paths whose basename equals `name`. Returns [] if git is absent. */
+  findFilesByBasename?(name: string): Promise<string[]>;
 }
 
 export interface PackageJson {
@@ -129,4 +137,8 @@ export interface DriftConfig {
   debug: boolean;
   verbose: boolean;
   since?: string;
+  reportPath?: string;
+  writeReport?: boolean;
+  /** When set, only these drift kinds are checked (overrides rules but not 'off' rules). */
+  kinds?: DriftKind[];
 }

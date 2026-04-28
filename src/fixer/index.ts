@@ -4,6 +4,7 @@ import { DriftReport } from '../types.js';
 import { parsePatch } from './patch-parser.js';
 import { formatUnifiedDiff } from './diff-formatter.js';
 import { getLogger } from '../util/logger.js';
+import { lineHash as computeLineHash } from '../util/lineHash.js';
 
 export type { PatchEntry } from './patch-parser.js';
 export { parsePatch } from './patch-parser.js';
@@ -35,6 +36,119 @@ function groupByFile(patches: import('./patch-parser.js').PatchEntry[]): Map<str
   return map;
 }
 
+function detectEol(content: string): '\r\n' | '\n' {
+  return content.includes('\r\n') ? '\r\n' : '\n';
+}
+
+/**
+ * Apply a pre-built list of patches directly to their target files.
+ * Useful for testing or for callers that construct PatchEntry objects manually
+ * (e.g. with explicit column / lineHash fields set).
+ */
+export async function applyPatchList(
+  patches: import('./patch-parser.js').PatchEntry[],
+  root: string,
+): Promise<FixResult> {
+  const byFile = groupByFile(patches);
+  const logger = getLogger();
+
+  let applied = 0;
+  let skipped = 0;
+
+  for (const [filePath, filePatches] of byFile) {
+    // Security: ensure path is within project root
+    const resolvedPath = path.resolve(filePath);
+    const resolvedRoot = path.resolve(root);
+    const normalizedRoot = resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep;
+    if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(normalizedRoot)) {
+      for (const p of filePatches) p.applied = false;
+      skipped += filePatches.length;
+      continue;
+    }
+
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const eol = detectEol(content);
+      const hadTrailingEol = content.endsWith(eol);
+      const lines = content.split(/\r?\n/);
+
+      // Remove the trailing empty element produced by a final newline so that
+      // join(eol) + conditional eol reconstructs the file faithfully.
+      if (hadTrailingEol && lines[lines.length - 1] === '') {
+        lines.pop();
+      }
+
+      // Apply patches in reverse line order to avoid line-index shifts
+      const sorted = [...filePatches].sort((a, b) => b.line - a.line);
+
+      for (const patch of sorted) {
+        const idx = patch.line - 1;
+        if (idx < 0 || idx >= lines.length) {
+          patch.applied = false;
+          skipped++;
+          continue;
+        }
+
+        const current = lines[idx];
+
+        // Stale-line guard: skip if the line has changed since audit was emitted
+        if (patch.lineHash && computeLineHash(current) !== patch.lineHash) {
+          logger.warn(
+            { filePath, line: patch.line },
+            'skipping fix — line has changed since audit',
+          );
+          patch.applied = false;
+          skipped++;
+          continue;
+        }
+
+        // Determine replacement position
+        let pos: number;
+        if (typeof patch.column === 'number' && typeof patch.originalLength === 'number') {
+          // Column-anchored match (B-08): verify the text at the exact position
+          const col0 = patch.column - 1;
+          const slice = current.slice(col0, col0 + patch.originalLength);
+          if (slice !== patch.original) {
+            logger.warn({ filePath, line: patch.line }, 'column mismatch at fix site');
+            patch.applied = false;
+            skipped++;
+            continue;
+          }
+          pos = col0;
+        } else {
+          // Fallback: first-occurrence match
+          pos = current.indexOf(patch.original);
+          if (pos === -1) {
+            patch.applied = false;
+            skipped++;
+            continue;
+          }
+        }
+
+        lines[idx] =
+          current.slice(0, pos) +
+          patch.replacement +
+          current.slice(pos + patch.original.length);
+        patch.applied = true;
+        applied++;
+      }
+
+      // Reconstruct file, preserving original EOL style and trailing-newline presence
+      let next = lines.join(eol);
+      if (hadTrailingEol) next += eol;
+      await fs.writeFile(filePath, next, 'utf-8');
+    } catch (err) {
+      logger.warn({ filePath, err }, 'Failed to apply patches to file');
+      for (const p of filePatches) {
+        p.applied = false;
+      }
+      skipped += filePatches.length;
+    }
+  }
+
+  return { applied, skipped, patches };
+}
+
 /**
  * Apply patches to files. If dryRun is true, only return what would change.
  */
@@ -52,60 +166,7 @@ export async function applyFixes(
     };
   }
 
-  const byFile = groupByFile(patches);
-
-  let applied = 0;
-  let skipped = 0;
-
-  for (const [filePath, filePatches] of byFile) {
-    // Security: ensure path is within project root
-    const resolvedPath = path.resolve(filePath);
-    const resolvedRoot = path.resolve(report.root);
-    const normalizedRoot = resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep;
-    if (resolvedPath !== resolvedRoot && !resolvedPath.startsWith(normalizedRoot)) {
-      for (const p of filePatches) p.applied = false;
-      skipped += filePatches.length;
-      continue;
-    }
-
-    try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      const eol = content.includes('\r\n') ? '\r\n' : '\n';
-      const lines = content.split(eol);
-
-      // Apply patches in reverse line order to avoid line shifts
-      const sorted = filePatches.sort((a, b) => b.line - a.line);
-
-      for (const patch of sorted) {
-        const lineIdx = patch.line - 1;
-        if (lineIdx >= 0 && lineIdx < lines.length) {
-          const currentLine = lines[lineIdx];
-          if (currentLine.includes(patch.original)) {
-            lines[lineIdx] = currentLine.replace(patch.original, patch.replacement);
-            patch.applied = true;
-            applied++;
-          } else {
-            patch.applied = false;
-            skipped++;
-          }
-        } else {
-          patch.applied = false;
-          skipped++;
-        }
-      }
-
-      await fs.writeFile(filePath, lines.join(eol), 'utf-8');
-    } catch (err) {
-      const logger = getLogger();
-      logger.warn({ filePath, err }, 'Failed to apply patches to file');
-      for (const p of filePatches) {
-        p.applied = false;
-      }
-      skipped += filePatches.length;
-    }
-  }
-
-  return { applied, skipped, patches };
+  return applyPatchList(patches, report.root);
 }
 
 /**

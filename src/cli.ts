@@ -5,11 +5,14 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { runAudit } from './audit.js';
 import { loadConfig } from './config.js';
-import { createLogger } from './util/logger.js';
+import { createLogger, setDefaultLogger } from './util/logger.js';
+import { VERIFIER_DESCRIPTIONS } from './verifiers/catalog.js';
+import { runInit } from './cli/init.js';
 import { emitReport } from './report/index.js';
 import { applyFixes } from './fixer/index.js';
 import { installPrePushHook } from './hooks/install.js';
-import type { Severity } from './types.js';
+import { VALID_DRIFT_KINDS } from './types.js';
+import type { DriftConfig, DriftKind, Severity } from './types.js';
 
 function severityOrder(s: Severity): number {
   return s === 'high' ? 0 : s === 'medium' ? 1 : 2;
@@ -38,6 +41,7 @@ program
   .argument('[path]', 'Path to audit', '.')
   .option('--since <ref>', 'Only audit docs changed since git ref')
   .option('--kind <kinds>', 'Comma-separated drift kinds to check')
+  .option('--include <patterns>', 'Comma-separated globs to add to discovery')
   .option('--json', 'Output as JSON')
   .option('--sarif', 'Output as SARIF')
   .option('--max-severity <level>', 'Exit non-zero above threshold', 'high')
@@ -45,29 +49,68 @@ program
   .option('--offline', 'Skip external link checks')
   .option('--verbose', 'Verbose logging')
   .option('--debug', 'Debug mode with intermediate output')
-  .action(async (auditPath: string, options: Record<string, unknown>) => {
+  .option('--no-report', 'Skip writing DRIFT_REPORT.md')
+  .option('--report-path <path>', 'Path to write markdown report')
+  .action(async (auditPath: string, opts: Record<string, unknown>) => {
     try {
       const root = path.resolve(auditPath || '.');
-      createLogger({
-        verbose: options['verbose'] as boolean | undefined,
-        debug: options['debug'] as boolean | undefined,
-      });
+      setDefaultLogger(createLogger({
+        verbose: opts['verbose'] as boolean | undefined,
+        debug: opts['debug'] as boolean | undefined,
+      }));
 
-      const config = await loadConfig({
-        json: options['json'] as boolean | undefined,
-        sarif: options['sarif'] as boolean | undefined,
-        maxSeverity: (options['maxSeverity'] as Severity | undefined),
-        offline: options['offline'] as boolean | undefined,
-        debug: options['debug'] as boolean | undefined,
-        verbose: options['verbose'] as boolean | undefined,
-        since: options['since'] as string | undefined,
-        ignorePaths: options['ignore']
-          ? (options['ignore'] as string).split(',')
-          : [],
+      // Load file config + defaults, passing only scalar CLI flags that never
+      // cause an empty-array override bug.
+      const loadedConfig = await loadConfig({
+        json: opts['json'] as boolean | undefined,
+        sarif: opts['sarif'] as boolean | undefined,
+        maxSeverity: opts['maxSeverity'] as Severity | undefined,
+        offline: opts['offline'] as boolean | undefined,
+        debug: opts['debug'] as boolean | undefined,
+        verbose: opts['verbose'] as boolean | undefined,
+        since: opts['since'] as string | undefined,
       }, root);
 
+      // Build CLI overrides — a key is only added when the user actually
+      // supplied that flag (fixes B-17: --ignore was always passing [] before).
+      const cliOverrides: Partial<DriftConfig> = {};
+
+      if (opts['kind']) {
+        const rawKinds = (opts['kind'] as string).split(',').map(s => s.trim()).filter(Boolean);
+        const invalid = rawKinds.filter(k => !(VALID_DRIFT_KINDS as readonly string[]).includes(k));
+        if (invalid.length > 0) {
+          console.error(
+            `Unknown drift kind(s): ${invalid.join(', ')}.\nValid kinds are: ${VALID_DRIFT_KINDS.join(', ')}`,
+          );
+          process.exit(2);
+        }
+        cliOverrides.kinds = rawKinds as DriftKind[];
+      }
+
+      if (opts['include']) {
+        // Concatenate with whatever include patterns are already in the loaded config.
+        const extra = (opts['include'] as string).split(',').map(s => s.trim()).filter(Boolean);
+        cliOverrides.include = [...loadedConfig.include, ...extra];
+      }
+
+      if (opts['ignore']) {
+        cliOverrides.ignorePaths = (opts['ignore'] as string)
+          .split(',').map(s => s.trim()).filter(Boolean);
+      }
+
+      if (opts['reportPath'] !== undefined) {
+        cliOverrides.reportPath = opts['reportPath'] as string;
+      }
+
+      if (opts['report'] === false) {
+        cliOverrides.writeReport = false;
+      }
+
+      const config: DriftConfig = { ...loadedConfig, ...cliOverrides };
+
       const report = await runAudit(root, config);
-      await emitReport(report, config, root);
+      const format = config.json ? 'json' : config.sarif ? 'sarif' : 'terminal';
+      await emitReport(report, { format, config });
 
       // Exit code based on severity
       if (report.issues.length === 0) {
@@ -95,7 +138,7 @@ program
   .action(async (options: Record<string, unknown>) => {
     try {
       const root = path.resolve('.');
-      createLogger({});
+      setDefaultLogger(createLogger({}));
       const config = await loadConfig({}, root);
       const report = await runAudit(root, config);
       const result = await applyFixes(report, {
@@ -130,6 +173,32 @@ hookCmd
     } catch (err) {
       console.error('Error installing hook:', (err as Error).message);
       process.exit(2);
+    }
+  });
+
+const verifiersCmd = program
+  .command('verifiers')
+  .description('Verifier management');
+
+verifiersCmd
+  .command('list')
+  .description('List all drift verifier kinds')
+  .action(() => {
+    for (const [kind, meta] of Object.entries(VERIFIER_DESCRIPTIONS)) {
+      console.log(`${kind.padEnd(20)} [${meta.defaultSeverity}] ${meta.description}`);
+    }
+  });
+
+program
+  .command('init')
+  .description('Scaffold a drift.config.mjs')
+  .option('--force', 'overwrite existing config')
+  .action(async (opts: Record<string, unknown>) => {
+    try {
+      await runInit(process.cwd(), !!opts['force']);
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exit(1);
     }
   });
 

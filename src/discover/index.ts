@@ -1,5 +1,5 @@
 import { readFile, stat } from 'node:fs/promises';
-import { join, resolve, extname } from 'node:path';
+import { join, resolve, extname, basename } from 'node:path';
 import { globby } from 'globby';
 import { getLogger } from '../util/logger.js';
 import type { DocSource } from '../types.js';
@@ -15,14 +15,21 @@ const MAX_FILE_SIZE = 1_048_576; // 1 MB
 
 type DocType = DocSource['type'];
 
+const EXTLESS_DOC_BASENAMES = new Set([
+  'README', 'CHANGELOG', 'CONTRIBUTING', 'LICENSE', 'NOTICE', 'AUTHORS',
+]);
+
 function classifyFile(filePath: string): DocType | null {
   const ext = extname(filePath).toLowerCase();
   switch (ext) {
     case '.md':
     case '.mdx':
       return 'markdown';
-    default:
+    default: {
+      const base = basename(filePath);
+      if (EXTLESS_DOC_BASENAMES.has(base)) return 'markdown';
       return null;
+    }
   }
 }
 
@@ -38,7 +45,7 @@ export async function discoverDocs(options: DiscoverOptions): Promise<DocSource[
     }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`Root path does not exist: ${root}`);
+      throw new Error(`Root path does not exist: ${root}`, { cause: err });
     }
     throw err;
   }
