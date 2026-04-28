@@ -1,6 +1,5 @@
-import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { DriftReport, DriftConfig } from '../types.js';
+import { DriftReport, DriftConfig, Severity } from '../types.js';
 import { writeMarkdownReport } from './markdown.js';
 import { generateJsonReport } from './json.js';
 import { generateSarifReport } from './sarif.js';
@@ -11,21 +10,34 @@ export { generateJsonReport } from './json.js';
 export { generateSarifReport } from './sarif.js';
 export { generateTerminalReport } from './terminal.js';
 
+function briefSummary(report: DriftReport): string {
+  const counts: Record<Severity, number> = { high: 0, medium: 0, low: 0 };
+  for (const issue of report.issues) {
+    counts[issue.severity]++;
+  }
+  const total = report.issues.length;
+  return `drift-sentinel: ${total} issue${total !== 1 ? 's' : ''} (${counts.high} high, ${counts.medium} medium, ${counts.low} low)`;
+}
+
 export async function emitReport(
   report: DriftReport,
-  config: DriftConfig,
-  outputDir: string,
+  opts: { format: 'terminal' | 'json' | 'sarif'; config: DriftConfig },
 ): Promise<void> {
-  // Always print to terminal
-  console.log(generateTerminalReport(report));
+  const { format, config } = opts;
 
-  if (config.json) {
-    console.log(generateJsonReport(report));
-  } else if (config.sarif) {
-    const sarifPath = path.join(outputDir, 'drift-report.sarif');
-    await writeFile(sarifPath, generateSarifReport(report), 'utf-8');
+  if (format === 'json') {
+    process.stdout.write(generateJsonReport(report) + '\n');
+    process.stderr.write(briefSummary(report) + '\n');
+  } else if (format === 'sarif') {
+    process.stdout.write(generateSarifReport(report) + '\n');
+    process.stderr.write(briefSummary(report) + '\n');
   } else {
-    // Default: write DRIFT_REPORT.md
-    await writeMarkdownReport(report, path.join(outputDir, 'DRIFT_REPORT.md'));
+    process.stdout.write(generateTerminalReport(report));
+  }
+
+  if (config.writeReport !== false) {
+    const reportPath = config.reportPath ?? path.join(report.root, 'DRIFT_REPORT.md');
+    await writeMarkdownReport(report, reportPath);
   }
 }
+

@@ -1,4 +1,5 @@
 import { DriftReport, DriftIssue, Severity } from '../types.js';
+import { toRelativePosix } from './paths.js';
 
 const ANSI = {
   red: '\x1b[31m',
@@ -77,7 +78,8 @@ export function generateTerminalReport(report: DriftReport, isTTY?: boolean): st
   for (const issue of sorted) {
     const color = SEVERITY_COLOR[issue.severity];
     const label = SEVERITY_LABEL[issue.severity];
-    const loc = `${issue.reference.source.path}:${issue.reference.source.line}`;
+    const relPath = toRelativePosix(issue.reference.source.path, report.root);
+    const loc = `${relPath}:${issue.reference.source.line}`;
     lines.push('');
     lines.push(`${color}${label}${ANSI.reset}  ${loc}  ${issue.kind}`);
     lines.push(`  ${issue.message}`);

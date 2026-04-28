@@ -129,4 +129,6 @@ export interface DriftConfig {
   debug: boolean;
   verbose: boolean;
   since?: string;
+  reportPath?: string;
+  writeReport?: boolean;
 }

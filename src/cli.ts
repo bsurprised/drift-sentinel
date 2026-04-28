@@ -45,6 +45,8 @@ program
   .option('--offline', 'Skip external link checks')
   .option('--verbose', 'Verbose logging')
   .option('--debug', 'Debug mode with intermediate output')
+  .option('--no-report', 'Skip writing DRIFT_REPORT.md')
+  .option('--report-path <path>', 'Path to write markdown report')
   .action(async (auditPath: string, options: Record<string, unknown>) => {
     try {
       const root = path.resolve(auditPath || '.');
@@ -64,10 +66,14 @@ program
         ignorePaths: options['ignore']
           ? (options['ignore'] as string).split(',')
           : [],
+        // Only set when user explicitly supplied the flag
+        ...(options['report'] === false ? { writeReport: false } : {}),
+        ...(options['reportPath'] !== undefined ? { reportPath: options['reportPath'] as string } : {}),
       }, root);
 
       const report = await runAudit(root, config);
-      await emitReport(report, config, root);
+      const format = config.json ? 'json' : config.sarif ? 'sarif' : 'terminal';
+      await emitReport(report, { format, config });
 
       // Exit code based on severity
       if (report.issues.length === 0) {

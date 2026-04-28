@@ -1,7 +1,8 @@
 import { DriftReport, DriftIssue, Severity } from '../types.js';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { toRelativeUri } from './paths.js';
 
 let _version: string | undefined;
 function getVersion(): string {
@@ -52,7 +53,7 @@ function humanize(kind: string): string {
     .join(' ');
 }
 
-function buildResult(issue: DriftIssue) {
+function buildResult(issue: DriftIssue, root: string) {
   return {
     ruleId: issue.kind,
     level: SEVERITY_TO_LEVEL[issue.severity],
@@ -60,7 +61,10 @@ function buildResult(issue: DriftIssue) {
     locations: [
       {
         physicalLocation: {
-          artifactLocation: { uri: issue.reference.source.path },
+          artifactLocation: {
+            uri: toRelativeUri(issue.reference.source.path, root),
+            uriBaseId: 'PROJECTROOT',
+          },
           region: {
             startLine: issue.reference.source.line,
             startColumn: issue.reference.source.column,
@@ -73,6 +77,7 @@ function buildResult(issue: DriftIssue) {
 }
 
 export function generateSarifReport(report: DriftReport): string {
+  const rootUri = pathToFileURL(report.root).href;
   const sarif = {
     $schema: SARIF_SCHEMA,
     version: '2.1.0' as const,
@@ -86,7 +91,10 @@ export function generateSarifReport(report: DriftReport): string {
             rules: buildRules(report.issues),
           },
         },
-        results: report.issues.map(buildResult),
+        originalUriBaseIds: {
+          PROJECTROOT: { uri: rootUri.endsWith('/') ? rootUri : rootUri + '/' },
+        },
+        results: report.issues.map(issue => buildResult(issue, report.root)),
       },
     ],
   };

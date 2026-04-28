@@ -1,5 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 import { DriftReport, DriftIssue, Severity } from '../types.js';
+import { toRelativePosix } from './paths.js';
 
 const SEVERITY_HEADERS: Record<Severity, string> = {
   high: '🔴 High severity',
@@ -21,9 +22,10 @@ function formatDate(iso: string): string {
   return iso.slice(0, 10);
 }
 
-function renderIssue(issue: DriftIssue): string {
+function renderIssue(issue: DriftIssue, root: string): string {
   const { reference, kind, message, suggestion, autoFixable, patch } = issue;
-  const loc = `${reference.source.path}:${reference.source.line}`;
+  const relPath = toRelativePosix(reference.source.path, root);
+  const loc = `${relPath}:${reference.source.line}`;
   const lines: string[] = [];
 
   lines.push(`### ${loc} — ${kind}`);
@@ -70,7 +72,7 @@ export function generateMarkdownReport(report: DriftReport): string {
 
     for (const issue of issues) {
       lines.push('');
-      lines.push(renderIssue(issue));
+      lines.push(renderIssue(issue, report.root));
       lines.push('');
       lines.push('---');
     }
@@ -84,3 +86,4 @@ export async function writeMarkdownReport(report: DriftReport, outputPath: strin
   const content = generateMarkdownReport(report);
   await writeFile(outputPath, content, 'utf-8');
 }
+

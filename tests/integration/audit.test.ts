@@ -1,12 +1,13 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, mkdir, writeFile, rm, access } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { execSync } from 'node:child_process';
 import { runAudit } from '../../src/audit.js';
 import { DEFAULT_CONFIG } from '../../src/config.js';
 import { createLogger } from '../../src/util/logger.js';
-import type { DriftConfig } from '../../src/types.js';
+import { emitReport } from '../../src/report/index.js';
+import type { DriftConfig, DriftReport } from '../../src/types.js';
 
 let fixtureDir: string;
 
@@ -215,3 +216,146 @@ describe('runAudit integration', () => {
     expect(kinds.has('unknown-cli-command')).toBe(false);
   });
 });
+
+describe('emitReport — output routing and writeReport gating (LLD-E)', () => {
+  let testDir: string;
+  let baseReport: DriftReport;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(path.join(os.tmpdir(), 'emit-test-'));
+    baseReport = {
+      root: testDir,
+      scannedDocs: 1,
+      scannedReferences: 1,
+      issues: [],
+      durationMs: 10,
+      generatedAt: new Date().toISOString(),
+    };
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it('writes DRIFT_REPORT.md by default (terminal mode)', async () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    try {
+      await emitReport(baseReport, { format: 'terminal', config: DEFAULT_CONFIG });
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).resolves.not.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('--no-report (writeReport: false) does not create DRIFT_REPORT.md', async () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    try {
+      const config: DriftConfig = { ...DEFAULT_CONFIG, writeReport: false };
+      await emitReport(baseReport, { format: 'terminal', config });
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).rejects.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('--report-path writes markdown to the specified custom path', async () => {
+    const spy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const customPath = path.join(testDir, 'custom-report.md');
+    try {
+      const config: DriftConfig = { ...DEFAULT_CONFIG, reportPath: customPath };
+      await emitReport(baseReport, { format: 'terminal', config });
+      await expect(access(customPath)).resolves.not.toThrow();
+      // Default path should NOT be created when reportPath is set
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).rejects.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('--json: stdout is pure JSON (starts with {), stderr contains summary', async () => {
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      stdoutChunks.push(String(chunk));
+      return true;
+    });
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      stderrChunks.push(String(chunk));
+      return true;
+    });
+    try {
+      const config: DriftConfig = { ...DEFAULT_CONFIG, writeReport: false };
+      await emitReport(baseReport, { format: 'json', config });
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+    const out = stdoutChunks.join('');
+    expect(out.trimStart()).toMatch(/^\{/);
+    expect(() => JSON.parse(out)).not.toThrow();
+    expect(stderrChunks.join('')).toContain('drift-sentinel:');
+  });
+
+  it('--json: JSON output has both path (relative) and absPath fields on issue sources', async () => {
+    const issueReport: DriftReport = {
+      ...baseReport,
+      issues: [
+        {
+          reference: {
+            id: 'ref-1',
+            source: { path: path.join(testDir, 'README.md'), line: 1, column: 1 },
+            kind: 'link-file',
+            target: 'nonexistent.md',
+            context: 'ctx',
+          },
+          kind: 'dead-file-ref',
+          severity: 'high',
+          message: 'File not found',
+          autoFixable: false,
+        },
+      ],
+    };
+    const stdoutChunks: string[] = [];
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      stdoutChunks.push(String(chunk));
+      return true;
+    });
+    vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      const config: DriftConfig = { ...DEFAULT_CONFIG, writeReport: false };
+      await emitReport(issueReport, { format: 'json', config });
+    } finally {
+      stdoutSpy.mockRestore();
+      vi.restoreAllMocks();
+    }
+    const parsed = JSON.parse(stdoutChunks.join(''));
+    expect(parsed.issues[0].reference.source.path).toBe('README.md');
+    expect(parsed.issues[0].reference.source.absPath).toBe(path.join(testDir, 'README.md'));
+  });
+
+  it('--sarif: stdout is valid SARIF JSON (version 2.1.0), stderr contains summary', async () => {
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+      stdoutChunks.push(String(chunk));
+      return true;
+    });
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+      stderrChunks.push(String(chunk));
+      return true;
+    });
+    try {
+      const config: DriftConfig = { ...DEFAULT_CONFIG, writeReport: false };
+      await emitReport(baseReport, { format: 'sarif', config });
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+    const out = stdoutChunks.join('');
+    const parsed = JSON.parse(out);
+    expect(parsed.version).toBe('2.1.0');
+    expect(parsed.runs[0].originalUriBaseIds.PROJECTROOT.uri).toMatch(/^file:\/\//);
+    expect(stderrChunks.join('')).toContain('drift-sentinel:');
+  });
+});
+
