@@ -1,8 +1,12 @@
 import { readFile, readdir } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { join, relative, basename } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { ProjectContext, PackageJson, TsConfig, CargoToml, Pyproject } from '../types.js';
 import { extractMakefileTargets } from './makefile.js';
 import { getLogger } from '../util/logger.js';
+
+const execFileAsync = promisify(execFile);
 
 function stripJsonComments(content: string): string {
   let result = '';
@@ -126,12 +130,43 @@ async function tryReadFile(path: string): Promise<string | null> {
   }
 }
 
+async function buildBasenameMap(root: string): Promise<Map<string, string[]>> {
+  try {
+    const { stdout } = await execFileAsync('git', ['ls-files'], {
+      cwd: root,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const map = new Map<string, string[]>();
+    for (const line of stdout.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const base = basename(trimmed);
+      const list = map.get(base) ?? [];
+      list.push(trimmed);
+      map.set(base, list);
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function createFindFilesByBasename(root: string): (name: string) => Promise<string[]> {
+  let cachePromise: Promise<Map<string, string[]>> | null = null;
+  return async (name: string): Promise<string[]> => {
+    if (!cachePromise) cachePromise = buildBasenameMap(root);
+    const map = await cachePromise;
+    return map.get(name) ?? [];
+  };
+}
+
 export async function detectProjectContext(root: string): Promise<ProjectContext> {
   const log = getLogger();
   const ctx: ProjectContext = {
     root,
     makefileTargets: [],
     detectedLanguages: [],
+    findFilesByBasename: createFindFilesByBasename(root),
   };
 
   // 1. package.json

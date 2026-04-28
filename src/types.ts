@@ -28,6 +28,8 @@ export interface DocReference {
   target: string;
   context: string;
   language?: string;
+  /** How this reference was expressed in source. Missing means treat as 'markdown-link'. */
+  origin?: 'inline-code' | 'markdown-link';
 }
 
 export interface DriftIssue {
@@ -49,6 +51,8 @@ export interface ProjectContext {
   csprojs?: Array<{ path: string; version?: string }>;
   makefileTargets: string[];
   detectedLanguages: Array<'typescript' | 'javascript' | 'rust' | 'dotnet' | 'python' | 'go'>;
+  /** Lazily returns all git-tracked paths whose basename equals `name`. Returns [] if git is absent. */
+  findFilesByBasename?(name: string): Promise<string[]>;
 }
 
 export interface PackageJson {
