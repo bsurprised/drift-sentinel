@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { DriftConfig, DriftKind, Severity } from './types.js';
@@ -44,30 +44,54 @@ function deepMerge(base: DriftConfig, override: Partial<DriftConfig>): DriftConf
   return result;
 }
 
+const CANDIDATE_BASENAMES = [
+  'drift.config.mjs',
+  'drift.config.cjs',
+  'drift.config.js',
+  'drift.config.ts',
+];
+
+async function fileExists(p: string): Promise<boolean> {
+  try { await access(p); return true; } catch { return false; }
+}
+
+function tsLoaderRegistered(): boolean {
+  const opts = process.env.NODE_OPTIONS ?? '';
+  return /tsx|ts-node/.test(opts) || !!(process as any)[Symbol.for('ts-node.register.instance')];
+}
+
 export async function loadConfig(
   cliOptions: Partial<DriftConfig>,
   root: string,
 ): Promise<DriftConfig> {
-  let config: DriftConfig = { ...DEFAULT_CONFIG };
+  let fileConfig: Partial<DriftConfig> = {};
 
-  // Try loading drift.config.ts or drift.config.js from root
-  for (const filename of ['drift.config.ts', 'drift.config.js']) {
-    const configPath = join(root, filename);
-    try {
-      await readFile(configPath, 'utf-8');
-      const fileUrl = pathToFileURL(configPath).href;
-      const mod = await import(fileUrl);
-      const fileConfig = (mod.default ?? mod) as Partial<DriftConfig>;
-      config = deepMerge(config, fileConfig);
-      break;
-    } catch {
-      // File doesn't exist or can't be imported, continue
+  for (const name of CANDIDATE_BASENAMES) {
+    const abs = join(root, name);
+    if (!(await fileExists(abs))) continue;
+
+    if (name.endsWith('.ts') && !tsLoaderRegistered()) {
+      throw new Error(
+        `Found ${name} but no TypeScript loader is registered.\n` +
+        `Run with \`node --import tsx bin/drift.js ...\` or rename to drift.config.mjs / .js.`,
+      );
     }
+
+    let mod;
+    try {
+      mod = await import(pathToFileURL(abs).href);
+    } catch (err) {
+      throw new Error(
+        `Failed to load ${abs}: ${(err as Error).message}`,
+        { cause: err },
+      );
+    }
+    fileConfig = mod.default ?? mod;
+    break;
   }
 
-  // CLI options win
+  let config = deepMerge(DEFAULT_CONFIG, fileConfig);
   config = deepMerge(config, cliOptions);
-
   return config;
 }
 
