@@ -1,8 +1,10 @@
 import { DriftReport, DriftIssue, Severity } from '../types.js';
+import type { DriftKind } from '../types.js';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { toRelativeUri } from './paths.js';
+import { VERIFIER_DESCRIPTIONS } from '../verifiers/catalog.js';
 
 let _version: string | undefined;
 function getVersion(): string {
@@ -41,7 +43,7 @@ function buildRules(issues: DriftIssue[]): Array<{
 
   return Array.from(seen.entries()).map(([kind, severity]) => ({
     id: kind,
-    shortDescription: { text: humanize(kind) },
+    shortDescription: { text: VERIFIER_DESCRIPTIONS[kind as DriftKind]?.description ?? humanize(kind) },
     defaultConfiguration: { level: SEVERITY_TO_LEVEL[severity] },
   }));
 }

@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url';
 import { Command } from 'commander';
 import { runAudit } from './audit.js';
 import { loadConfig } from './config.js';
-import { createLogger } from './util/logger.js';
+import { createLogger, setDefaultLogger } from './util/logger.js';
+import { VERIFIER_DESCRIPTIONS } from './verifiers/catalog.js';
+import { runInit } from './cli/init.js';
 import { emitReport } from './report/index.js';
 import { applyFixes } from './fixer/index.js';
 import { installPrePushHook } from './hooks/install.js';
@@ -52,10 +54,10 @@ program
   .action(async (auditPath: string, opts: Record<string, unknown>) => {
     try {
       const root = path.resolve(auditPath || '.');
-      createLogger({
+      setDefaultLogger(createLogger({
         verbose: opts['verbose'] as boolean | undefined,
         debug: opts['debug'] as boolean | undefined,
-      });
+      }));
 
       // Load file config + defaults, passing only scalar CLI flags that never
       // cause an empty-array override bug.
@@ -136,7 +138,7 @@ program
   .action(async (options: Record<string, unknown>) => {
     try {
       const root = path.resolve('.');
-      createLogger({});
+      setDefaultLogger(createLogger({}));
       const config = await loadConfig({}, root);
       const report = await runAudit(root, config);
       const result = await applyFixes(report, {
@@ -171,6 +173,32 @@ hookCmd
     } catch (err) {
       console.error('Error installing hook:', (err as Error).message);
       process.exit(2);
+    }
+  });
+
+const verifiersCmd = program
+  .command('verifiers')
+  .description('Verifier management');
+
+verifiersCmd
+  .command('list')
+  .description('List all drift verifier kinds')
+  .action(() => {
+    for (const [kind, meta] of Object.entries(VERIFIER_DESCRIPTIONS)) {
+      console.log(`${kind.padEnd(20)} [${meta.defaultSeverity}] ${meta.description}`);
+    }
+  });
+
+program
+  .command('init')
+  .description('Scaffold a drift.config.mjs')
+  .option('--force', 'overwrite existing config')
+  .action(async (opts: Record<string, unknown>) => {
+    try {
+      await runInit(process.cwd(), !!opts['force']);
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exit(1);
     }
   });
 

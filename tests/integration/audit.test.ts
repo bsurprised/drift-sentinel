@@ -358,6 +358,30 @@ describe('emitReport — output routing and writeReport gating (LLD-E)', () => {
   });
 });
 
+describe('runAudit — pipeline split regression (LLD-G)', () => {
+  it('returns same issue kinds after pipeline refactor', async () => {
+    const config: DriftConfig = {
+      ...DEFAULT_CONFIG,
+      offline: true,
+      rules: { 'dead-external-link': 'off' },
+    };
+    const report = await runAudit(fixtureDir, config);
+
+    // Verify structural correctness — same kinds must still surface
+    const sortedKinds = [...report.issues.map(i => i.kind)].sort();
+    expect(sortedKinds.length).toBeGreaterThan(0);
+    expect(sortedKinds).toContain('unknown-cli-command');
+    expect(sortedKinds).toContain('dead-file-ref');
+
+    // Report envelope is intact
+    expect(report.root).toBe(fixtureDir);
+    expect(report.scannedDocs).toBeGreaterThanOrEqual(3);
+    expect(report.scannedReferences).toBeGreaterThan(0);
+    expect(report.generatedAt).toBeTruthy();
+    expect(report.durationMs).toBeGreaterThan(0);
+  });
+});
+
 describe('runAudit — kinds filter (LLD-B / B-02)', () => {
   it('with kinds: [dead-file-ref] only reports dead-file-ref issues', async () => {
     const config: DriftConfig = {
