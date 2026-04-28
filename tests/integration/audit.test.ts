@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { execSync } from 'node:child_process';
 import { runAudit } from '../../src/audit.js';
-import { DEFAULT_CONFIG } from '../../src/config.js';
+import { DEFAULT_CONFIG, loadConfig } from '../../src/config.js';
 import { createLogger } from '../../src/util/logger.js';
 import { emitReport } from '../../src/report/index.js';
 import type { DriftConfig, DriftReport } from '../../src/types.js';
@@ -217,8 +217,7 @@ describe('runAudit integration', () => {
   });
 });
 
-describe('emitReport — output routing and writeReport gating (LLD-E)', () => {
-  let testDir: string;
+describe('emitReport — output routing and writeReport gating (LLD-E)', () => {  let testDir: string;
   let baseReport: DriftReport;
 
   beforeEach(async () => {
@@ -359,3 +358,70 @@ describe('emitReport — output routing and writeReport gating (LLD-E)', () => {
   });
 });
 
+describe('runAudit — kinds filter (LLD-B / B-02)', () => {
+  it('with kinds: [dead-file-ref] only reports dead-file-ref issues', async () => {
+    const config: DriftConfig = {
+      ...DEFAULT_CONFIG,
+      offline: true,
+      kinds: ['dead-file-ref'],
+    };
+    const report = await runAudit(fixtureDir, config);
+    // Must find the known dead-file-ref in fixture README
+    const kinds = new Set(report.issues.map(i => i.kind));
+    expect(kinds.has('dead-file-ref')).toBe(true);
+    // Other verifiers must NOT have run
+    expect(kinds.has('missing-symbol')).toBe(false);
+    expect(kinds.has('unknown-cli-command')).toBe(false);
+    expect(kinds.has('version-mismatch')).toBe(false);
+  });
+
+  it('with kinds: [] (empty) reports no issues from any verifier', async () => {
+    const config: DriftConfig = {
+      ...DEFAULT_CONFIG,
+      offline: true,
+      kinds: [],
+    };
+    const report = await runAudit(fixtureDir, config);
+    expect(report.issues).toHaveLength(0);
+  });
+});
+
+describe('loadConfig — ignorePaths CLI override (LLD-B / B-17)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(path.join(os.tmpdir(), 'cfg-b17-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('ignorePaths from config file is preserved when CLI omits --ignore', async () => {
+    await writeFile(
+      path.join(tmpDir, 'drift.config.mjs'),
+      'export default { ignorePaths: ["keep-me"] };\n',
+    );
+    const config = await loadConfig({}, tmpDir);
+    expect(config.ignorePaths).toEqual(['keep-me']);
+  });
+
+  it('CLI ignorePaths override replaces config file ignorePaths', async () => {
+    await writeFile(
+      path.join(tmpDir, 'drift.config.mjs'),
+      'export default { ignorePaths: ["old-path"] };\n',
+    );
+    const config = await loadConfig({ ignorePaths: ['new-path'] }, tmpDir);
+    expect(config.ignorePaths).toEqual(['new-path']);
+  });
+
+  it('passing ignorePaths: undefined does NOT erase config file value (B-17 root cause)', async () => {
+    await writeFile(
+      path.join(tmpDir, 'drift.config.mjs'),
+      'export default { ignorePaths: ["preserved"] };\n',
+    );
+    // Simulate what the FIXED CLI does: only adds ignorePaths when flag is present
+    const config = await loadConfig({ ignorePaths: undefined }, tmpDir);
+    expect(config.ignorePaths).toEqual(['preserved']);
+  });
+});

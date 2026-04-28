@@ -59,9 +59,14 @@ export async function runAudit(root: string, config: DriftConfig): Promise<Drift
   }
   logger.info(`Extracted ${allReferences.length} references`);
 
-  // 7. Create verifiers
+  // 7. Create verifiers — filtered by both rules and optional kinds whitelist
   const verifiers: Verifier[] = [];
-  if (isRuleEnabled(config, 'dead-external-link')) {
+
+  function kindAllowed(kind: import('./types.js').DriftKind): boolean {
+    return isRuleEnabled(config, kind) && (!config.kinds || config.kinds.includes(kind));
+  }
+
+  if (kindAllowed('dead-external-link')) {
     verifiers.push(new LinkExternalVerifier({
       timeout: config.linkTimeout,
       cacheDays: config.linkCacheDays,
@@ -69,12 +74,12 @@ export async function runAudit(root: string, config: DriftConfig): Promise<Drift
       maxConcurrent: 10,
     }));
   }
-  if (isRuleEnabled(config, 'dead-file-ref')) verifiers.push(new LinkFileVerifier());
-  if (isRuleEnabled(config, 'missing-symbol')) verifiers.push(new SymbolRefVerifier());
-  if (isRuleEnabled(config, 'invalid-code-example')) verifiers.push(new CodeBlockVerifier());
-  if (isRuleEnabled(config, 'unknown-cli-command')) verifiers.push(new CliCommandVerifier());
-  if (isRuleEnabled(config, 'version-mismatch')) verifiers.push(new VersionRefVerifier());
-  if (isRuleEnabled(config, 'deprecated-api-mention')) verifiers.push(new DeprecatedApiVerifier());
+  if (kindAllowed('dead-file-ref')) verifiers.push(new LinkFileVerifier());
+  if (kindAllowed('missing-symbol')) verifiers.push(new SymbolRefVerifier());
+  if (kindAllowed('invalid-code-example')) verifiers.push(new CodeBlockVerifier());
+  if (kindAllowed('unknown-cli-command')) verifiers.push(new CliCommandVerifier());
+  if (kindAllowed('version-mismatch')) verifiers.push(new VersionRefVerifier());
+  if (kindAllowed('deprecated-api-mention')) verifiers.push(new DeprecatedApiVerifier());
 
   // 8. Run verifiers on each reference
   logger.info('Running verifiers...');
@@ -97,7 +102,7 @@ export async function runAudit(root: string, config: DriftConfig): Promise<Drift
   }
 
   // 9. Run orphan-doc verifier (operates on the full set)
-  if (isRuleEnabled(config, 'orphan-doc')) {
+  if (kindAllowed('orphan-doc')) {
     try {
       const orphanVerifier = new OrphanDocVerifier();
       const orphans = await orphanVerifier.checkAll(docs, allReferences, ctx);

@@ -8,6 +8,18 @@ export type DriftKind =
   | 'deprecated-api-mention'
   | 'orphan-doc';
 
+/** All valid DriftKind values as a runtime constant (for CLI validation). */
+export const VALID_DRIFT_KINDS: readonly DriftKind[] = [
+  'dead-external-link',
+  'dead-file-ref',
+  'missing-symbol',
+  'invalid-code-example',
+  'unknown-cli-command',
+  'version-mismatch',
+  'deprecated-api-mention',
+  'orphan-doc',
+] as const;
+
 export type Severity = 'high' | 'medium' | 'low';
 
 export interface DocSource {
@@ -135,4 +147,6 @@ export interface DriftConfig {
   since?: string;
   reportPath?: string;
   writeReport?: boolean;
+  /** When set, only these drift kinds are checked (overrides rules but not 'off' rules). */
+  kinds?: DriftKind[];
 }

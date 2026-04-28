@@ -9,7 +9,8 @@ import { createLogger } from './util/logger.js';
 import { emitReport } from './report/index.js';
 import { applyFixes } from './fixer/index.js';
 import { installPrePushHook } from './hooks/install.js';
-import type { Severity } from './types.js';
+import { VALID_DRIFT_KINDS } from './types.js';
+import type { DriftConfig, DriftKind, Severity } from './types.js';
 
 function severityOrder(s: Severity): number {
   return s === 'high' ? 0 : s === 'medium' ? 1 : 2;
@@ -38,6 +39,7 @@ program
   .argument('[path]', 'Path to audit', '.')
   .option('--since <ref>', 'Only audit docs changed since git ref')
   .option('--kind <kinds>', 'Comma-separated drift kinds to check')
+  .option('--include <patterns>', 'Comma-separated globs to add to discovery')
   .option('--json', 'Output as JSON')
   .option('--sarif', 'Output as SARIF')
   .option('--max-severity <level>', 'Exit non-zero above threshold', 'high')
@@ -47,29 +49,62 @@ program
   .option('--debug', 'Debug mode with intermediate output')
   .option('--no-report', 'Skip writing DRIFT_REPORT.md')
   .option('--report-path <path>', 'Path to write markdown report')
-  .action(async (auditPath: string, options: Record<string, unknown>) => {
+  .action(async (auditPath: string, opts: Record<string, unknown>) => {
     try {
       const root = path.resolve(auditPath || '.');
       createLogger({
-        verbose: options['verbose'] as boolean | undefined,
-        debug: options['debug'] as boolean | undefined,
+        verbose: opts['verbose'] as boolean | undefined,
+        debug: opts['debug'] as boolean | undefined,
       });
 
-      const config = await loadConfig({
-        json: options['json'] as boolean | undefined,
-        sarif: options['sarif'] as boolean | undefined,
-        maxSeverity: (options['maxSeverity'] as Severity | undefined),
-        offline: options['offline'] as boolean | undefined,
-        debug: options['debug'] as boolean | undefined,
-        verbose: options['verbose'] as boolean | undefined,
-        since: options['since'] as string | undefined,
-        ignorePaths: options['ignore']
-          ? (options['ignore'] as string).split(',')
-          : [],
-        // Only set when user explicitly supplied the flag
-        ...(options['report'] === false ? { writeReport: false } : {}),
-        ...(options['reportPath'] !== undefined ? { reportPath: options['reportPath'] as string } : {}),
+      // Load file config + defaults, passing only scalar CLI flags that never
+      // cause an empty-array override bug.
+      const loadedConfig = await loadConfig({
+        json: opts['json'] as boolean | undefined,
+        sarif: opts['sarif'] as boolean | undefined,
+        maxSeverity: opts['maxSeverity'] as Severity | undefined,
+        offline: opts['offline'] as boolean | undefined,
+        debug: opts['debug'] as boolean | undefined,
+        verbose: opts['verbose'] as boolean | undefined,
+        since: opts['since'] as string | undefined,
       }, root);
+
+      // Build CLI overrides — a key is only added when the user actually
+      // supplied that flag (fixes B-17: --ignore was always passing [] before).
+      const cliOverrides: Partial<DriftConfig> = {};
+
+      if (opts['kind']) {
+        const rawKinds = (opts['kind'] as string).split(',').map(s => s.trim()).filter(Boolean);
+        const invalid = rawKinds.filter(k => !(VALID_DRIFT_KINDS as readonly string[]).includes(k));
+        if (invalid.length > 0) {
+          console.error(
+            `Unknown drift kind(s): ${invalid.join(', ')}.\nValid kinds are: ${VALID_DRIFT_KINDS.join(', ')}`,
+          );
+          process.exit(2);
+        }
+        cliOverrides.kinds = rawKinds as DriftKind[];
+      }
+
+      if (opts['include']) {
+        // Concatenate with whatever include patterns are already in the loaded config.
+        const extra = (opts['include'] as string).split(',').map(s => s.trim()).filter(Boolean);
+        cliOverrides.include = [...loadedConfig.include, ...extra];
+      }
+
+      if (opts['ignore']) {
+        cliOverrides.ignorePaths = (opts['ignore'] as string)
+          .split(',').map(s => s.trim()).filter(Boolean);
+      }
+
+      if (opts['reportPath'] !== undefined) {
+        cliOverrides.reportPath = opts['reportPath'] as string;
+      }
+
+      if (opts['report'] === false) {
+        cliOverrides.writeReport = false;
+      }
+
+      const config: DriftConfig = { ...loadedConfig, ...cliOverrides };
 
       const report = await runAudit(root, config);
       const format = config.json ? 'json' : config.sarif ? 'sarif' : 'terminal';
