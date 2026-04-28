@@ -60,6 +60,33 @@ drift audit --max-severity high .
 
 # Ignore specific paths
 drift audit --ignore "docs/legacy/**,archive/**" .
+
+# Run only specific kinds
+drift audit --kind dead-file-ref,missing-symbol .
+
+# Add extra include globs (in addition to defaults)
+drift audit --include "guides/**/*.md" .
+
+# Skip the DRIFT_REPORT.md file
+drift audit --no-report .
+
+# Write the markdown report to a custom location
+drift audit --report-path build/drift-report.md .
+```
+
+### Discover verifiers
+
+```bash
+# List all drift kinds with default severity and description
+drift verifiers list
+```
+
+### Init
+
+```bash
+# Scaffold a starter drift.config.mjs in the project root
+drift init
+drift init --force   # overwrite existing config
 ```
 
 ### Fix
@@ -81,23 +108,26 @@ drift hook install
 
 ## Configuration
 
-Create a `drift.config.ts` or `drift.config.js` in your project root:
+Create a `drift.config.mjs` (recommended), `drift.config.cjs`, `drift.config.js`, or `drift.config.ts` in your project root. Note: `drift.config.ts` requires a TypeScript loader (e.g. run with `node --import tsx`); use `.mjs` if you don't want a loader dependency.
 
-```typescript
-import type { DriftConfig } from 'drift-sentinel';
-
+```js
+// drift.config.mjs
+/** @type {import('drift-sentinel').DriftConfig} */
 export default {
   include: ['**/*.md', '**/*.mdx'],
-  exclude: ['**/node_modules/**', '**/dist/**'],
+  ignorePaths: ['**/node_modules/**', '**/dist/**'],
   rules: {
     'dead-external-link': 'medium',
     'orphan-doc': 'off',           // disable a rule
     'missing-symbol': 'high',
   },
+  // kinds: ['missing-symbol', 'dead-file-ref'],   // restrict to a subset
+  // writeReport: true,                            // default true for terminal mode
+  // reportPath: 'build/drift-report.md',          // custom output path
   linkTimeout: 5000,
   linkCacheDays: 7,
   offline: false,
-} satisfies Partial<DriftConfig>;
+};
 ```
 
 ## Inline Suppressions
@@ -113,10 +143,10 @@ The comment must appear within 3 lines above the reference and include the drift
 
 ## Output Formats
 
-- **Terminal** — colored summary (always printed)
-- **Markdown** — `DRIFT_REPORT.md` written to the project root (default)
-- **JSON** — `--json` flag, printed to stdout
-- **SARIF** — `--sarif` flag, written as `drift-report.sarif`
+- **Terminal** — colored summary (always printed to stdout for the default format)
+- **Markdown** — `DRIFT_REPORT.md` written to the project root (default for terminal format; opt in for `--json`/`--sarif`; suppress with `--no-report`; relocate with `--report-path`)
+- **JSON** — `--json` flag, **only** JSON to stdout (a one-line summary goes to stderr)
+- **SARIF** — `--sarif` flag, **only** SARIF JSON to stdout with relative `artifactLocation.uri` values (suitable for GitHub code scanning); summary on stderr
 
 ## GitHub Action
 

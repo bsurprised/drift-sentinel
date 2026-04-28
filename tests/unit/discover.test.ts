@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import { discoverDocs } from '../../src/discover/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TEST_TMP_BASE = path.join(__dirname, '__tmp__');
+const TEST_TMP_BASE = path.join(__dirname, '__tmp_discover__');
 
 let testDir: string;
 
