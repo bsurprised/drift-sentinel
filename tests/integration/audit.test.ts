@@ -295,6 +295,57 @@ describe('emitReport — output routing and writeReport gating (LLD-E)', () => {
     expect(stderrChunks.join('')).toContain('drift-sentinel:');
   });
 
+  it('--json default: does NOT write DRIFT_REPORT.md without explicit writeReport', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      // No writeReport / reportPath set — machine-output mode must stay clean
+      await emitReport(baseReport, { format: 'json', config: { ...DEFAULT_CONFIG } });
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).rejects.toThrow();
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('--sarif default: does NOT write DRIFT_REPORT.md without explicit writeReport', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      await emitReport(baseReport, { format: 'sarif', config: { ...DEFAULT_CONFIG } });
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).rejects.toThrow();
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('--json with writeReport=true: DOES write DRIFT_REPORT.md', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    const stderrSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true);
+    try {
+      await emitReport(baseReport, {
+        format: 'json',
+        config: { ...DEFAULT_CONFIG, writeReport: true },
+      });
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).resolves.not.toThrow();
+    } finally {
+      stdoutSpy.mockRestore();
+      stderrSpy.mockRestore();
+    }
+  });
+
+  it('legacy 3-arg signature: emitReport(report, config, outputDir) still works', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    try {
+      // v1.0 call shape: positional config + outputDir
+      await emitReport(baseReport, DEFAULT_CONFIG, testDir);
+      await expect(access(path.join(testDir, 'DRIFT_REPORT.md'))).resolves.not.toThrow();
+    } finally {
+      stdoutSpy.mockRestore();
+    }
+  });
+
   it('--json: JSON output has both path (relative) and absPath fields on issue sources', async () => {
     const issueReport: DriftReport = {
       ...baseReport,

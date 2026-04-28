@@ -10,3 +10,12 @@ export const VERIFIER_DESCRIPTIONS: Record<DriftKind, { defaultSeverity: Severit
   'deprecated-api-mention':{ defaultSeverity: 'medium', description: 'Doc references an API marked deprecated.' },
   'orphan-doc':            { defaultSeverity: 'low',    description: 'Markdown file is not linked from anywhere.' },
 };
+
+/**
+ * Single source of truth for the set of valid DriftKind values at runtime.
+ * Derived from VERIFIER_DESCRIPTIONS so that adding a new DriftKind without
+ * a description is a compile-time error (Record exhaustiveness check).
+ */
+export const VALID_DRIFT_KINDS: readonly DriftKind[] =
+  Object.keys(VERIFIER_DESCRIPTIONS) as DriftKind[];
+

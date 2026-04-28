@@ -19,11 +19,42 @@ function briefSummary(report: DriftReport): string {
   return `drift-sentinel: ${total} issue${total !== 1 ? 's' : ''} (${counts.high} high, ${counts.medium} medium, ${counts.low} low)`;
 }
 
+export type EmitFormat = 'terminal' | 'json' | 'sarif';
+export interface EmitOptions { format: EmitFormat; config: DriftConfig; }
+
+/**
+ * Emit a drift report.
+ *
+ * Two call shapes are supported for backward compatibility:
+ *   - v1.1 (preferred): `emitReport(report, { format, config })`
+ *   - v1.0 (deprecated): `emitReport(report, config, outputDir?)` — always
+ *     produces terminal output and writes the markdown report to
+ *     `<outputDir>/DRIFT_REPORT.md` (or `<report.root>/DRIFT_REPORT.md`).
+ *
+ * Markdown report write rules (v1.1):
+ *   - `config.writeReport === false`            → never write
+ *   - `config.writeReport === true`             → always write
+ *   - `config.reportPath` set, `writeReport` not explicitly false → write to that path
+ *   - format `'terminal'` (default) and writeReport unset → write `<root>/DRIFT_REPORT.md`
+ *   - format `'json'` / `'sarif'` and writeReport unset → DO NOT write the markdown
+ *     file (machine-output modes stay clean by default; matches v1.0 behaviour)
+ */
 export async function emitReport(
   report: DriftReport,
-  opts: { format: 'terminal' | 'json' | 'sarif'; config: DriftConfig },
+  optsOrConfig: EmitOptions | DriftConfig,
+  legacyOutputDir?: string,
 ): Promise<void> {
-  const { format, config } = opts;
+  let format: EmitFormat;
+  let config: DriftConfig;
+  let legacyMode = false;
+
+  if (optsOrConfig && typeof (optsOrConfig as EmitOptions).format === 'string') {
+    ({ format, config } = optsOrConfig as EmitOptions);
+  } else {
+    legacyMode = true;
+    config = optsOrConfig as DriftConfig;
+    format = 'terminal';
+  }
 
   if (format === 'json') {
     process.stdout.write(generateJsonReport(report) + '\n');
@@ -35,9 +66,29 @@ export async function emitReport(
     process.stdout.write(generateTerminalReport(report));
   }
 
-  if (config.writeReport !== false) {
-    const reportPath = config.reportPath ?? path.join(report.root, 'DRIFT_REPORT.md');
+  const writeReportFlag = config.writeReport;
+  const reportPathSet = typeof config.reportPath === 'string';
+
+  let shouldWrite: boolean;
+  if (writeReportFlag === false) {
+    shouldWrite = false;
+  } else if (writeReportFlag === true || reportPathSet || legacyMode) {
+    shouldWrite = true;
+  } else {
+    // writeReport not explicitly set: default depends on format.
+    // Terminal mode keeps the v1.0 behaviour (write DRIFT_REPORT.md);
+    // machine-output modes stay clean unless the user opts in.
+    shouldWrite = format === 'terminal';
+  }
+
+  if (shouldWrite) {
+    const reportPath =
+      config.reportPath ??
+      (legacyOutputDir
+        ? path.join(legacyOutputDir, 'DRIFT_REPORT.md')
+        : path.join(report.root, 'DRIFT_REPORT.md'));
     await writeMarkdownReport(report, reportPath);
   }
 }
+
 

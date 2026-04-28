@@ -8,17 +8,9 @@ export type DriftKind =
   | 'deprecated-api-mention'
   | 'orphan-doc';
 
-/** All valid DriftKind values as a runtime constant (for CLI validation). */
-export const VALID_DRIFT_KINDS: readonly DriftKind[] = [
-  'dead-external-link',
-  'dead-file-ref',
-  'missing-symbol',
-  'invalid-code-example',
-  'unknown-cli-command',
-  'version-mismatch',
-  'deprecated-api-mention',
-  'orphan-doc',
-] as const;
+/** All valid DriftKind values as a runtime constant (for CLI validation).
+ *  Re-exported from src/verifiers/catalog.ts for backward compatibility. */
+export { VALID_DRIFT_KINDS } from './verifiers/catalog.js';
 
 export type Severity = 'high' | 'medium' | 'low';
 
